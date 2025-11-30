@@ -8,7 +8,7 @@ CREATE TABLE airports (
     timezone TEXT NOT NULL
 );
 
---Таблица: авиакомпании
+-- Таблица: авиакомпании
 CREATE TABLE airlines (
     airline_code CHAR(2) PRIMARY KEY,
     airline_name TEXT NOT NULL UNIQUE
@@ -73,7 +73,7 @@ CREATE TABLE routes (
     aircraft_code CHAR(3) NOT NULL,
     departure_time TIMESTAMPTZ NOT NULL,
     arrival_time TIMESTAMPTZ NOT NULL,
-    flight_hours INT CHECK (flight_hours > 0),
+    flight_time TEXT,
     FOREIGN KEY (departure_airport) REFERENCES airports(airport_code),
     FOREIGN KEY (arrival_airport) REFERENCES airports(airport_code),
     FOREIGN KEY (base_airport) REFERENCES airports(airport_code),
@@ -97,25 +97,26 @@ CREATE TABLE transit_routes (
     CHECK (arrival_time < departure_time)
 );
 
+-- Индексы
 
---индекс для поиска всех аэропортов по стране
+-- Индекс для поиска всех аэропортов по стране
 CREATE INDEX idx_airports_country ON airports(country);
 
---индекс для поиска самолётов по авиакомпании
+-- Индекс для поиска самолётов по авиакомпании
 CREATE INDEX idx_aircrafts_airline ON aircrafts(airline_code);
 
---индекс для поиска сотрудников по аэропорту  должности
+-- Индекс для поиска сотрудников по аэропорту и должности
 CREATE INDEX idx_staff_airport_position ON staff(airport_code, position_id);
 
+-- Представления
 
---базовая информация об аэропортах
+-- Базовая информация об аэропортах
 CREATE VIEW airports_info AS
 SELECT airport_name, city, country
 FROM airports 
 ORDER BY airport_name;
 
-
---данные о самолётах вместе с авиакомпанией и аэропортом базирования
+-- Данные о самолётах вместе с авиакомпанией и аэропортом базирования
 CREATE VIEW aircrafts_info AS
 SELECT a.aircraft_name, a.aircraft_code, a.capacity, a.range_km, al.airline_name, ap.airport_name AS base_airport
 FROM aircrafts a 
@@ -123,9 +124,7 @@ JOIN airlines al ON a.airline_code = al.airline_code
 JOIN airports ap ON a.airport_code = ap.airport_code
 ORDER BY a.aircraft_name;
 
-
---подсчёт количества самолётов каждой авиакомпании и вывод только тех, у которых их больше 1
-
+-- Подсчёт количества самолётов каждой авиакомпании и вывод только тех, у которых их больше 1
 CREATE VIEW airlines_fleet AS
 SELECT al.airline_name, COUNT(a.aircraft_code) AS aircraft_count
 FROM airlines al
@@ -133,18 +132,29 @@ JOIN aircrafts a ON al.airline_code = a.airline_code
 GROUP BY al.airline_name
 HAVING COUNT(a.aircraft_code) > 1;
 
-
--- Функция для автоматического пересчёта часов полёта
-CREATE OR REPLACE FUNCTION calc_flight_hours()
+-- Функция и триггер для автоматического форматирования времени полёта
+CREATE OR REPLACE FUNCTION format_flight_time()
 RETURNS TRIGGER AS $$
+DECLARE
+    total_minutes INT;
+    hours INT;
+    minutes INT;
 BEGIN
-    NEW.flight_hours := EXTRACT(EPOCH FROM (NEW.arrival_time - NEW.departure_time)) / 3600;
+    -- Вычисляем общее количество минут полёта
+    total_minutes := EXTRACT(EPOCH FROM (NEW.arrival_time - NEW.departure_time)) / 60;
+    
+    -- Разделяем на часы и минуты
+    hours := total_minutes / 60;
+    minutes := total_minutes % 60;
+    
+    -- Форматируем в виде "Xч Yм"
+    NEW.flight_time := hours || 'ч ' || minutes || 'м';
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_calc_flight_hours
+CREATE TRIGGER trg_format_flight_time
 BEFORE INSERT OR UPDATE ON routes
 FOR EACH ROW
-EXECUTE FUNCTION calc_flight_hours();
+EXECUTE FUNCTION format_flight_time();
